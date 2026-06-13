@@ -1,1 +1,6 @@
-cron.yml
+# 4. Installeer de missende Ubuntu-pakketten en daarna de Chromium-browser voor Playwright
+    - name: Install Playwright Web Browser Dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y libasound2t64
+        playwright install chromium --with-deps
