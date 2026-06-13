@@ -13,42 +13,86 @@ def scrape_scorito():
         return
 
     with sync_playwright() as p:
+        # Start browser op met een realistische computer-identiteit
         browser = p.chromium.launch(headless=True)
-        context = browser.new_context(viewport={"width": 1280, "height": 720}, locale="nl-NL")
+        context = browser.new_context(
+            viewport={"width": 1280, "height": 720},
+            user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+            locale="nl-NL"
+        )
         page = context.new_page()
         
         try:
             print("1. Navigeren naar Scorito inlogpagina...")
-            page.goto("https://www.scorito.com/account/login", wait_until="networkidle")
+            page.goto("https://www.scorito.com/account/login", wait_until="domcontentloaded")
+            time.sleep(3) # Even rustig de pagina laten ademen
             
             print("1b. Controleren op cookie-pop-up...")
-            cookie_button = page.locator('button:has-text("Akkoord"), button:has-text("Accepteren"), button:has-text("Accept"), #CybotCookiebotDialogBodyLevelButtonLevelOptinAllowAll')
+            cookie_selectors = [
+                'button:has-text("Akkoord")', 
+                'button:has-text("Accepteren")', 
+                'button:has-text("Accept")', 
+                '#CybotCookiebotDialogBodyLevelButtonLevelOptinAllowAll'
+            ]
             
-            if cookie_button.first.is_visible(timeout=5000):
-                print("Cookie-pop-up gevonden, we klikken op akkoord...")
-                cookie_button.first.click()
-                # Extra ademruimte geven zodat de pop-up écht van het scherm verdwenen is
-                print("Wachten tot het cookiescherm volledig weg is...")
-                time.sleep(3) 
-            else:
-                print("Geen cookie-pop-up in beeld, we gaan door.")
+            for selector in cookie_selectors:
+                try:
+                    btn = page.locator(selector).first
+                    if btn.is_visible(timeout=2000):
+                        print(f"Cookieknop gevonden ({selector}), klikken...")
+                        btn.click()
+                        time.sleep(2)
+                        break
+                except:
+                    continue
 
             print("2. Inloggegevens invullen...")
-            # We zoeken nu robuust op de placeholders 'E-mailadres' en 'Wachtwoord'
-            email_field = page.get_by_placeholder("E-mailadres", exact=False)
-            password_field = page.get_by_placeholder("Wachtwoord", exact=False)
             
-            # Wacht tot het e-mailveld klaar staat en vul de gegevens in
-            email_field.wait_for(state="attached", timeout=15000)
+            # --- NIEUW: We zoeken zowel op de hoofdpagina als in eventuele iframes ---
+            email_field = None
+            password_field = None
+            
+            # Strategie A: Zoeken op de hoofdpagina
+            locators_email = ['input[type="email"]', 'input[name*="mail"]', 'input[placeholder*="mail"]']
+            for loc in locators_email:
+                if page.locator(loc).first.is_visible(timeout=1000):
+                    email_field = page.locator(loc).first
+                    break
+            
+            # Strategie B: Als het in een iframe zit, zoek in alle frames
+            if not email_field:
+                print("Velden niet direct zichtbaar, zoeken in sub-frames...")
+                for frame in page.frames:
+                    for loc in locators_email:
+                        try:
+                            if frame.locator(loc).first.is_visible(timeout=1000):
+                                email_field = frame.locator(loc).first
+                                password_field = frame.locator('input[type="password"]').first
+                                print("Inlogvelden succesvol gevonden in sub-frame!")
+                                break
+                        except:
+                            continue
+                    if email_field:
+                        break
+
+            # Als we na alle strategieën nog steeds niks hebben, pakken we de absolute fallback
+            if not email_field:
+                email_field = page.locator('input[type="email"], input[name*="username"]').first
+                password_field = page.locator('input[type="password"]').first
+
+            # Gegevens daadwerkelijk invullen
             email_field.fill(SCORITO_USERNAME)
-            password_field.fill(SCORITO_PASSWORD)
+            if password_field:
+                password_field.fill(SCORITO_PASSWORD)
+            else:
+                page.locator('input[type="password"]').first.fill(SCORITO_PASSWORD)
             
             print("3. Klikken op de inlogknop...")
-            inlog_knop = page.locator('button[type="submit"], button:has-text("Inloggen"), input[type="submit"]').first
+            inlog_knop = page.locator('button[type="submit"], button:has-text("Inloggen"), button:has-text("Log in"), .login-button').first
             inlog_knop.click()
             
             print("4. Wachten op het dashboard...")
-            page.wait_for_url("**/apps/**", timeout=20000)
+            page.wait_for_url("**/apps/**", timeout=25000)
             
             print("5. Succesvol ingelogd! Navigeren naar poule...")
             page.goto(POULE_URL, wait_until="networkidle")
