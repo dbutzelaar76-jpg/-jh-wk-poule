@@ -5,7 +5,7 @@ from playwright.sync_api import sync_playwright
 
 SCORITO_USERNAME = os.environ.get("SCORITO_USER")
 SCORITO_PASSWORD = os.environ.get("SCORITO_PASS")
-POULE_URL = "https://www.scorito.com/apps/league/index.html?subleagueid=123456" 
+POULE_URL = "https://www.scorito.com/apps/league/index.html?subleagueid=1036045" 
 
 def scrape_scorito():
     if not SCORITO_USERNAME or not SCORITO_PASSWORD:
