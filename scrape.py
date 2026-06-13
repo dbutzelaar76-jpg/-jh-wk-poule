@@ -5,8 +5,8 @@ from playwright.sync_api import sync_playwright
 
 SCORITO_USERNAME = os.environ.get("SCORITO_USER")
 SCORITO_PASSWORD = os.environ.get("SCORITO_PASS")
-# Jouw poule staat vast op regel 8
-POULE_URL = "https://www.scorito.com/apps/league/index.html?subleagueid=1036045" 
+# Claude's juiste, directe desktop-URL:
+POULE_URL = "https://www.scorito.com/footballtournament/ranking/301/1036045" 
 
 def scrape_scorito():
     if not SCORITO_USERNAME or not SCORITO_PASSWORD:
@@ -14,21 +14,18 @@ def scrape_scorito():
         return
 
     with sync_playwright() as p:
-        # We dwingen een grote desktop browser af en schakelen de mobiele emulatie uit
         browser = p.chromium.launch(headless=True)
         context = browser.new_context(
             viewport={"width": 1920, "height": 1080},
             user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
-            locale="nl-NL",
-            is_mobile=False,
-            has_touch=False
+            locale="nl-NL"
         )
         page = context.new_page()
         
         try:
             print("1. Navigeren naar Scorito inlogpagina...")
-            page.goto("https://www.scorito.com/account/login", wait_until="networkidle")
-            time.sleep(3)
+            page.goto("https://www.scorito.com/account/login", wait_until="domcontentloaded")
+            time.sleep(2)
             
             print("1b. Controleren op cookie-pop-up...")
             cookie_button = page.locator('button:has-text("Akkoord"), button:has-text("Accepteren"), button:has-text("Accept"), #CybotCookiebotDialogBodyLevelButtonLevelOptinAllowAll').first
@@ -41,8 +38,8 @@ def scrape_scorito():
                 print("Geen cookie-pop-up geactiveerd.")
 
             print("2. Inloggegevens invullen...")
-            # We zoeken breed naar invoervelden, mocht hij onverhoopt toch de app tonen
-            email_field = page.locator('input[type="email"], input[name*="mail"], input[type="text"]').first
+            # Nu we op de normale desktopsite zitten, kunnen we direct de standaard ID's/types pakken
+            email_field = page.locator('input[type="email"], input[name*="username"], input[name*="mail"]').first
             password_field = page.locator('input[type="password"]').first
             
             email_field.wait_for(state="visible", timeout=15000)
@@ -53,76 +50,58 @@ def scrape_scorito():
             inlog_knop = page.locator('button[type="submit"], button:has-text("Inloggen"), .login-button').first
             inlog_knop.click()
             
-            print("4. Wachten op het dashboard...")
+            print("4. Wachten op succesvolle login (navigatie naar profiel/apps)...")
+            # We wachten tot de URL verandert richting de Scorito app-omgeving
             page.wait_for_url("**/apps/**", timeout=25000)
+            print("Inloggen geslaagd!")
             
-            print("5. Succesvol ingelogd! Navigeren naar poule...")
-            page.goto(POULE_URL, wait_until="networkidle")
-            time.sleep(5) # Geef de app in het telefoonscherm de tijd om op te starten
+            print("5. Navigeren naar de juiste poule-ranking...")
+            page.goto(POULE_URL, wait_until="domcontentloaded")
             
-            print("6. Stand-data lokaliseren...")
+            print("6. Wachten tot de stand-tabel én de asynchrone data geladen zijn...")
+            # We wachten specifiek tot er een tabelrij (tr) verschijnt die data bevat
+            # We geven Scorito maximaal 20 seconden om de data op te halen en te tonen
+            page.wait_for_selector("table tbody tr, .ranking-table tr, [class*='table'] tr", timeout=20000)
+            time.sleep(5) # Extra ademruimte om te zorgen dat écht alle namen er staan
+            
+            print("7. Data verzamelen uit de tabel...")
             stand_data = []
             
-            # Strategie 1: De tabel die we op je screenshot zien uitlezen (divs in plaats van tr/td)
-            # We zoeken naar elementen die de tekst bevatten, of we pakken de hoofdcontainer
-            page.wait_for_selector("body", timeout=10000)
+            # We zoeken naar alle rijen in de tabel
+            rows = page.locator("table tr, .ranking-table tr, [class*='table'] tr").all()
+            print(f"Aantal gevonden rijen in de tabel: {len(rows)}")
             
-            # We trekken alle tekst uit de pagina om te kijken of we de namen zien
-            page_text = page.content()
-            
-            # We zoeken naar de list-items of divs die de namen bevatten
-            # Omdat de stand in een mobiele lijst staat, zoeken we naar tekstblokken met getallen en namen
-            items = page.locator('div[class*="item"], div[class*="row"], tr').all()
-            
-            print(f"Systeemelementen gevonden om te scannen: {len(items)}")
-            
-            # Alternatieve robuuste methode: We pakken de ruwe tekst als we de tabel niet direct als HTML kunnen ontleden
-            # Voor nu proberen we de structuur te ontleden via algemene tekstregels
-            lines = page.locator('div').all_inner_texts()
-            
-            # Filter de regels om een mooie JSON op te bouwen
-            clean_rows = []
-            for line in lines:
-                if line and "\n" in line:
-                    parts = line.split("\n")
-                    # Een geldige rij heeft vaak: positie, naam, punten (bijv: ["31", "Johan", "90", "90"])
-                    if len(parts) >= 3 and parts[0].isdigit():
-                        pos = parts[0]
-                        naam = parts[1]
-                        punten = parts[2]
-                        # Voorkom dubbele invoer
-                        if {"positie": pos, "naam": naam, "punten": punten} not in clean_rows:
-                            clean_rows.append({"positie": pos, "naam": naam, "punten": punten})
-            
-            if clean_rows:
-                stand_data = clean_rows
-            else:
-                # Fallback: Mocht de desktopversie wél geladen zijn, lees de normale tabel uit
-                rows = page.query_selector_all("table tr")
-                for row in rows:
-                    cells = row.query_selector_all("td")
+            for row in rows:
+                try:
+                    # Haal alle cellen/kolommen binnen deze rij op
+                    cells = row.locator("td").all()
                     if len(cells) >= 3:
-                        stand_data.append({
-                            "positie": cells[0].inner_text().strip(),
-                            "naam": cells[1].inner_text().strip(),
-                            "punten": cells[2].inner_text().strip()
-                        })
+                        positie = cells[0].inner_text().strip()
+                        naam = cells[1].inner_text().strip()
+                        punten = cells[2].inner_text().strip()
+                        
+                        # Alleen toevoegen als het een geldige regel is (positie moet een getal zijn)
+                        if positie.replace('.', '').isdigit() and naam:
+                            stand_data.append({
+                                "positie": positie.replace('.', ''),
+                                "naam": naam,
+                                "punten": punten
+                            })
+                except Exception:
+                    continue
 
             if stand_data:
-                # Sorteer even netjes op positie
                 with open("stand.json", "w", encoding="utf-8") as f:
                     json.dump(stand_data, f, indent=4, ensure_ascii=False)
                 print(f"✅ Stand succesvol opgeslagen! {len(stand_data)} deelnemers verwerkt.")
             else:
-                print("⚠️ Waarschuwing: Kon de stand niet direct uit de mobiele interface trekken.")
-                # We forceren een fout zodat we de screenshot kunnen bekijken om de exacte HTML-tags te zien
-                raise Exception("Tabel-structuur niet herkend.")
+                raise Exception("Tabel wel gevonden, maar kon geen geldige rijen met tekst ontleden.")
 
         except Exception as e:
             print(f"\n❌ ER IS IETS MISGEGAAN TIJDENS HET SCRAPEN: {e}")
             try:
                 page.screenshot(path="error_screenshot.png", full_page=True)
-                print("📸 Screenshot succesvol opgeslagen!")
+                print("📸 Fout-screenshot succesvol opgeslagen!")
             except:
                 pass
             raise e
