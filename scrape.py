@@ -14,7 +14,6 @@ def scrape_scorito():
 
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=True)
-        # We zetten de taal op Nederlands, dat helpt bij het herkennen van de cookieknop
         context = browser.new_context(viewport={"width": 1280, "height": 720}, locale="nl-NL")
         page = context.new_page()
         
@@ -22,22 +21,27 @@ def scrape_scorito():
             print("1. Navigeren naar Scorito inlogpagina...")
             page.goto("https://www.scorito.com/account/login", wait_until="networkidle")
             
-            # --- NIEUW: COOKIE POP-UP WEGKLIKKEN ---
             print("1b. Controleren op cookie-pop-up...")
             cookie_button = page.locator('button:has-text("Akkoord"), button:has-text("Accepteren"), button:has-text("Accept"), #CybotCookiebotDialogBodyLevelButtonLevelOptinAllowAll')
             
             if cookie_button.first.is_visible(timeout=5000):
                 print("Cookie-pop-up gevonden, we klikken op akkoord...")
                 cookie_button.first.click()
-                time.sleep(1) # Halve seconde wachten tot de pop-up animatie weg is
+                # Extra ademruimte geven zodat de pop-up écht van het scherm verdwenen is
+                print("Wachten tot het cookiescherm volledig weg is...")
+                time.sleep(3) 
             else:
                 print("Geen cookie-pop-up in beeld, we gaan door.")
-            # ---------------------------------------
 
             print("2. Inloggegevens invullen...")
-            page.locator('input[type="email"], input[name="username"], input[id*="username"]').first.wait_for(state="visible", timeout=10000)
-            page.locator('input[type="email"], input[name="username"], input[id*="username"]').first.fill(SCORITO_USERNAME)
-            page.locator('input[type="password"], input[name="password"], input[id*="password"]').first.fill(SCORITO_PASSWORD)
+            # We zoeken nu robuust op de placeholders 'E-mailadres' en 'Wachtwoord'
+            email_field = page.get_by_placeholder("E-mailadres", exact=False)
+            password_field = page.get_by_placeholder("Wachtwoord", exact=False)
+            
+            # Wacht tot het e-mailveld klaar staat en vul de gegevens in
+            email_field.wait_for(state="attached", timeout=15000)
+            email_field.fill(SCORITO_USERNAME)
+            password_field.fill(SCORITO_PASSWORD)
             
             print("3. Klikken op de inlogknop...")
             inlog_knop = page.locator('button[type="submit"], button:has-text("Inloggen"), input[type="submit"]').first
