@@ -2,13 +2,15 @@ name: Scorito Scraper Cronjob
 
 on:
   schedule:
-    # Dit zorgt ervoor dat het script elke 30 minuten draait, 
-    # maar ALLEEN tussen 07:00 en 23:00 UTC (om GitHub-tegoed te besparen).
-    # Pas de tijden aan op basis van wanneer de wedstrijden live zijn!
+    # Draait elke 30 minuten tussen 07:00 en 23:00 UTC
     - cron: '*/30 7-23 * * *'
   
-  # Hiermee kun je het script ook handmatig starten via de GitHub website (handig om te testen)
+  # Hiermee kun je het script handmatig starten via de GitHub website
   workflow_dispatch:
+
+# Hiermee dwingen we de runner om direct Node.js 24 te gebruiken voor de acties (voldoet aan de 2026-eisen)
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: 'true'
 
 jobs:
   scrape-and-update:
@@ -19,25 +21,25 @@ jobs:
     - name: Checkout repository code
       uses: actions/checkout@v4
 
-    # 2. Installeer Python op de virtuele machine
+    # 2. Installeer Python op de virtuele machine (Nu met de juiste invoer-naam)
     - name: Set up Python
       uses: actions/setup-python@v5
       with:
-        python-node-version: '3.11'
+        python-version: '3.11'
         cache-dependency-path: 'requirements.txt'
 
-    # 3. Installeer de benodigde Python-pakketten (Playwright)
+    # 3. Installeer de benodigde Python-pakketten
     - name: Install dependencies
       run: |
         python -m pip install --upgrade pip
         pip install -r requirements.txt
 
-    # 4. Installeer de Chromium-browser die Playwright nodig heeft om te kunnen inloggen
+    # 4. Installeer de Chromium-browser voor Playwright
     - name: Install Playwright Web Browser
       run: |
         playwright install chromium --with-deps
 
-    # 5. Voer het Python-script uit en geef de GitHub Secrets (inloggegevens) mee
+    # 5. Voer het Python-script uit en geef de GitHub Secrets mee
     - name: Run Scorito Scraper
       env:
         SCORITO_USER: ${{ secrets.SCORITO_USER }}
@@ -51,7 +53,6 @@ jobs:
         git config --global user.name "Scorito Bot"
         git config --global user.email "bot@github.com"
         
-        # Controleer of stand.json daadwerkelijk is veranderd om loze commits te voorkomen
         git add stand.json
         if git diff --staged --quiet; then
           echo "Geen wijzigingen in de stand. JSON is ongewijzigd."
