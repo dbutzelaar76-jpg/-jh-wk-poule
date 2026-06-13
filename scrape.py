@@ -5,7 +5,6 @@ from playwright.sync_api import sync_playwright
 
 SCORITO_USERNAME = os.environ.get("SCORITO_USER")
 SCORITO_PASSWORD = os.environ.get("SCORITO_PASS")
-# Claude's juiste, directe desktop-URL:
 POULE_URL = "https://www.scorito.com/footballtournament/ranking/301/1036045" 
 
 def scrape_scorito():
@@ -38,7 +37,6 @@ def scrape_scorito():
                 print("Geen cookie-pop-up geactiveerd.")
 
             print("2. Inloggegevens invullen...")
-            # Nu we op de normale desktopsite zitten, kunnen we direct de standaard ID's/types pakken
             email_field = page.locator('input[type="email"], input[name*="username"], input[name*="mail"]').first
             password_field = page.locator('input[type="password"]').first
             
@@ -50,44 +48,52 @@ def scrape_scorito():
             inlog_knop = page.locator('button[type="submit"], button:has-text("Inloggen"), .login-button').first
             inlog_knop.click()
             
-            print("4. Wachten op succesvolle login (navigatie naar profiel/apps)...")
-            # We wachten tot de URL verandert richting de Scorito app-omgeving
+            print("4. Wachten op succesvolle login...")
             page.wait_for_url("**/apps/**", timeout=25000)
             print("Inloggen geslaagd!")
             
             print("5. Navigeren naar de juiste poule-ranking...")
             page.goto(POULE_URL, wait_until="domcontentloaded")
             
-            print("6. Wachten tot de stand-tabel én de asynchrone data geladen zijn...")
-            # We wachten specifiek tot er een tabelrij (tr) verschijnt die data bevat
-            # We geven Scorito maximaal 20 seconden om de data op te halen en te tonen
-            page.wait_for_selector("table tbody tr, .ranking-table tr, [class*='table'] tr", timeout=20000)
-            time.sleep(5) # Extra ademruimte om te zorgen dat écht alle namen er staan
+            print("6. Wachten tot de asynchrone data (de ranking) geladen is...")
+            # We wachten op de specifieke ranking/stand-elementen uit de React-app
+            page.wait_for_selector('[class*="ranking"], [class*="list"], table tr', timeout=20000)
+            time.sleep(6) # Extra ademruimte voor de trage JavaScript-inladen
             
-            print("7. Data verzamelen uit de tabel...")
+            # --- CLAUDE'S TIP: Maak een screenshot bij succes ---
+            try:
+                page.screenshot(path="success_screenshot.png", full_page=True)
+                print("📸 Succes-screenshot opgeslagen als 'success_screenshot.png'!")
+            except Exception as e_img:
+                print(f"Kon geen succes-screenshot maken: {e_img}")
+
+            print("7. Data verzamelen uit de pagina...")
             stand_data = []
             
-            # We zoeken naar alle rijen in de tabel
-            rows = page.locator("table tr, .ranking-table tr, [class*='table'] tr").all()
-            print(f"Aantal gevonden rijen in de tabel: {len(rows)}")
+            # We pakken breed alle elementen die eruitzien als een rij in de ranking
+            rows = page.locator('[class*="row"], [class*="item"], tr').all()
+            print(f"Systeemelementen gevonden om te scannen: {len(rows)}")
             
+            # We lezen de inner teksten uit om de namen en punten te filteren
             for row in rows:
                 try:
-                    # Haal alle cellen/kolommen binnen deze rij op
-                    cells = row.locator("td").all()
-                    if len(cells) >= 3:
-                        positie = cells[0].inner_text().strip()
-                        naam = cells[1].inner_text().strip()
-                        punten = cells[2].inner_text().strip()
-                        
-                        # Alleen toevoegen als het een geldige regel is (positie moet een getal zijn)
-                        if positie.replace('.', '').isdigit() and naam:
-                            stand_data.append({
-                                "positie": positie.replace('.', ''),
-                                "naam": naam,
-                                "punten": punten
-                            })
-                except Exception:
+                    text = row.inner_text().strip()
+                    if text and "\n" in text:
+                        parts = text.split("\n")
+                        # Controleren of de rij begint met een positie-getal (bijv: 31 \n Johan \n 90)
+                        if len(parts) >= 3 and parts[0].replace('.', '').isdigit():
+                            pos = parts[0].replace('.', '')
+                            naam = parts[1]
+                            punten = parts[2]
+                            
+                            # Voorkom dubbele regels in onze JSON
+                            if {"positie": pos, "naam": naam, "punten": punten} not in stand_data:
+                                stand_data.append({
+                                    "positie": pos,
+                                    "naam": naam,
+                                    "punten": punten
+                                })
+                except:
                     continue
 
             if stand_data:
@@ -95,7 +101,7 @@ def scrape_scorito():
                     json.dump(stand_data, f, indent=4, ensure_ascii=False)
                 print(f"✅ Stand succesvol opgeslagen! {len(stand_data)} deelnemers verwerkt.")
             else:
-                raise Exception("Tabel wel gevonden, maar kon geen geldige rijen met tekst ontleden.")
+                print("⚠️ Waarschuwing: Pagina geladen, maar kon geen data uit de elementen persen.")
 
         except Exception as e:
             print(f"\n❌ ER IS IETS MISGEGAAN TIJDENS HET SCRAPEN: {e}")
