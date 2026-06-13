@@ -1,14 +1,11 @@
-name: Scorito Scraper Cronjob
+name: Scorito Stand Scraper
 
 on:
   schedule:
-    # Draait elke 30 minuten tussen 07:00 en 23:00 UTC
-    - cron: '*/30 7-23 * * *'
-  
+    # Dit zorgt ervoor dat hij elke 15 minuten draait
+    - cron: '*/15 * * * *'
   workflow_dispatch:
-
-env:
-  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: 'true'
+    # Hiermee behoud je de "Run workflow" knop in GitHub Actions
 
 jobs:
   scrape-and-update:
@@ -22,17 +19,15 @@ jobs:
       uses: actions/setup-python@v5
       with:
         python-version: '3.11'
-        cache-dependency-path: 'requirements.txt'
 
     - name: Install dependencies
       run: |
         python -m pip install --upgrade pip
-        pip install -r requirements.txt
+        if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
 
-    - name: Install Playwright Web Browser Dependencies
+    - name: Ensure Playwright is installed
       run: |
-        sudo apt-get update
-        sudo apt-get install -y libasound2t64
+        pip install playwright
         playwright install chromium --with-deps
 
     - name: Run Scorito Scraper
@@ -41,6 +36,13 @@ jobs:
         SCORITO_PASS: ${{ secrets.SCORITO_PASS }}
       run: |
         python scrape.py
+
+    - name: Upload Page Screenshots
+      if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: scorito-page-screenshots
+        path: "*.png"
 
     - name: Commit and Push changes
       run: |
