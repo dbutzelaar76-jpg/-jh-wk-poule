@@ -13,7 +13,6 @@ def scrape_scorito():
         return
 
     with sync_playwright() as p:
-        # Start browser op met een realistische computer-identiteit
         browser = p.chromium.launch(headless=True)
         context = browser.new_context(
             viewport={"width": 1280, "height": 720},
@@ -25,7 +24,7 @@ def scrape_scorito():
         try:
             print("1. Navigeren naar Scorito inlogpagina...")
             page.goto("https://www.scorito.com/account/login", wait_until="domcontentloaded")
-            time.sleep(3) # Even rustig de pagina laten ademen
+            time.sleep(3)
             
             print("1b. Controleren op cookie-pop-up...")
             cookie_selectors = [
@@ -41,25 +40,21 @@ def scrape_scorito():
                     if btn.is_visible(timeout=2000):
                         print(f"Cookieknop gevonden ({selector}), klikken...")
                         btn.click()
-                        time.sleep(2)
+                        time.sleep(3)
                         break
                 except:
                     continue
 
             print("2. Inloggegevens invullen...")
-            
-            # --- NIEUW: We zoeken zowel op de hoofdpagina als in eventuele iframes ---
             email_field = None
             password_field = None
             
-            # Strategie A: Zoeken op de hoofdpagina
-            locators_email = ['input[type="email"]', 'input[name*="mail"]', 'input[placeholder*="mail"]']
+            locators_email = ['input[type="email"]', 'input[name*="mail"]', 'input[placeholder*="mail"]', 'input[placeholder*="username"]']
             for loc in locators_email:
                 if page.locator(loc).first.is_visible(timeout=1000):
                     email_field = page.locator(loc).first
                     break
             
-            # Strategie B: Als het in een iframe zit, zoek in alle frames
             if not email_field:
                 print("Velden niet direct zichtbaar, zoeken in sub-frames...")
                 for frame in page.frames:
@@ -75,12 +70,11 @@ def scrape_scorito():
                     if email_field:
                         break
 
-            # Als we na alle strategieën nog steeds niks hebben, pakken we de absolute fallback
             if not email_field:
+                print("Fallback: Velden dwingen op de hoofdpagina...")
                 email_field = page.locator('input[type="email"], input[name*="username"]').first
                 password_field = page.locator('input[type="password"]').first
 
-            # Gegevens daadwerkelijk invullen
             email_field.fill(SCORITO_USERNAME)
             if password_field:
                 password_field.fill(SCORITO_PASSWORD)
@@ -115,7 +109,7 @@ def scrape_scorito():
                     stand_data.append({
                         "positie": positie,
                         "naam": naam,
-                        "punten": punten
+                        "punten": points
                     })
             
             if stand_data:
@@ -128,6 +122,13 @@ def scrape_scorito():
         except Exception as e:
             print(f"\n❌ ER IS IETS MISGEGAAN TIJDENS HET SCRAPEN:")
             print(f"Foutmelding: {e}")
+            
+            # --- GARANDEER SCREENSHOT BIJ CRASH ---
+            try:
+                page.screenshot(path="error_screenshot.png", full_page=True)
+                print("📸 Screenshot succesvol opgeslagen als error_screenshot.png!")
+            except Exception as img_err:
+                print(f"Kon geen screenshot maken: {img_err}")
             raise e
             
         finally:
