@@ -1,0 +1,74 @@
+import json
+import time
+from playwright.sync_api import sync_playwright
+
+# Instellingen
+SCORITO_USERNAME = "debutz@live.nl"
+SCORITO_PASSWORD = "kujwaZ-zuzmub-dekku9"
+# Vervang dit door de exacte URL van jouw specifieke subpoule/subleague-pagina:
+POULE_URL = "https://www.scorito.com/apps/league/index.html?subleagueid=123456" 
+
+def scrape_scorito():
+    with sync_playwright() as p:
+        # Start een onzichtbare Chromium browser
+        browser = p.chromium.launch(headless=True)
+        page = browser.new_page()
+        
+        print("Navigeren naar Scorito...")
+        page.goto("https://www.scorito.com/account/login")
+        
+        # Wacht tot de inlogvelden er zijn en vul ze in
+        # Note: De exacte selector-namen kunnen soms wijzigen bij updates van Scorito
+        page.wait_for_selector('input[type="email"]')
+        page.fill('input[type="email"]', SCORITO_USERNAME)
+        page.fill('input[type="password"]', SCORITO_PASSWORD)
+        
+        # Klik op de inlogknop en wacht op de navigatie
+        print("Inloggen...")
+        page.click('button[type="submit"]')
+        page.wait_for_load_state("networkidle")
+        
+        # Navigeer naar de specifieke poule-pagina
+        print("Navigeren naar poule-pagina...")
+        page.goto(POULE_URL)
+        
+        # Wacht tot de tabel met deelnemers écht zichtbaar is op het scherm
+        # We zoeken naar de container waar de stand in staat (pas dit aan op basis van de HTML structure)
+        page.wait_for_selector('.league-table, table', timeout=15000)
+        
+        # Geef de pagina 2 seconden extra om alle data netjes te renderen
+        time.sleep(2)
+        
+        print("Data verzamelen...")
+        stand_data = []
+        
+        # Zoek alle rijen in de stand-tabel
+        # Dit is een voorbeeld-selector; inspecteer de Scorito-pagina om te zien welke klassen ze gebruiken
+        rows = page.query_selector_all("table tr")
+        
+        for row in rows:
+            cells = row.query_selector_all("td")
+            if len(cells) >= 3:
+                # Pluk de tekst uit de cellen (bijv: Positie, Naam, Punten)
+                positie = cells[0].inner_text().strip()
+                naam = cells[1].inner_text().strip()
+                punten = cells[2].inner_text().strip()
+                
+                stand_data.append({
+                    "positie": positie,
+                    "naam": naam,
+                    "punten": punten
+                })
+        
+        browser.close()
+        
+        # Sla de data op als JSON
+        if stand_data:
+            with open("stand.json", "w", encoding="utf-8") as f:
+                json.dump(stand_data, f, indent=4, ensure_ascii=False)
+            print("Stand succesvol opgeslagen in stand.json!")
+        else:
+            print("Fout: Geen data kunnen vinden in de tabel. Controleer de selectors.")
+
+if __name__ == "__main__":
+    scrape_scorito()
