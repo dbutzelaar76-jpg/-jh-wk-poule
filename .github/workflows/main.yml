@@ -1,10 +1,11 @@
+import os
 import json
 import time
 from playwright.sync_api import sync_playwright
 
 # Instellingen
-SCORITO_USERNAME = "jouw-email@werk.nl"
-SCORITO_PASSWORD = "JeWachtwoordHier"
+SCORITO_USERNAME = os.environ.get("SCORITO_USER")
+SCORITO_PASSWORD = os.environ.get("SCORITO_PASS")
 # Vervang dit door de exacte URL van jouw specifieke subpoule/subleague-pagina:
 POULE_URL = "https://www.scorito.com/apps/league/index.html?subleagueid=123456" 
 
