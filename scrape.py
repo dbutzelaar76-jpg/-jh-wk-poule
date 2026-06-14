@@ -1,95 +1,156 @@
 import os
 import json
-import requests
+import time
+from playwright.sync_api import sync_playwright
 
 SCORITO_USERNAME = os.environ.get("SCORITO_USER")
 SCORITO_PASSWORD = os.environ.get("SCORITO_PASS")
+POULE_URL = "https://www.scorito.com/footballtournament/ranking/301/1036045" 
 
-TOURNAMENT_ID = 301
-POOL_ID = 1036045
-
-def debug_scorito_api():
+def scrape_scorito():
     if not SCORITO_USERNAME or not SCORITO_PASSWORD:
-        print("❌ FOUT: GitHub Secrets (SCORITO_USER of SCORITO_PASS) zijn niet ingesteld of leeg!")
+        print("❌ FOUT: GitHub Secrets zijn niet ingesteld!")
         return
 
-    print(f"DEBUG: Starten met gebruiker: {SCORITO_USERNAME[:3]}***")
-    session = requests.Session()
-    
-    # We gebruiken exact de headers die de officiële Scorito web-app meestuurt
-    headers = {
-        "Content-Type": "application/json",
-        "Origin": "https://www.scorito.com",
-        "Referer": "https://www.scorito.com/",
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
-        "Accept": "application/json, text/plain, */*"
-    }
-    
-    payload = {
-        "username": SCORITO_USERNAME,
-        "password": SCORITO_PASSWORD
-    }
-    
-    # --- STAP 1: INLOGGEN ---
-    print("\n--- STAP 1: Proberen in te loggen via API ---")
-    login_url = "https://api.scorito.com/v1/login"
-    try:
-        response = session.post(login_url, json=payload, headers=headers, timeout=15)
-        print(f"Login Statuscode: {response.status_code}")
-        print(f"Login Response Tekst: {response.text[:500]}") # Print de eerste 500 tekens van het antwoord
+    with sync_playwright() as p:
+        print("1. Starten van een zware desktop browseromgeving...")
         
-        if response.status_code != 200:
-            print("\nProberen via authenticatie-fallback URL...")
-            fallback_url = "https://authentication.scorito.com/api/v1/login"
-            response = session.post(fallback_url, json=payload, headers=headers, timeout=15)
-            print(f"Fallback Login Statuscode: {response.status_code}")
-            print(f"Fallback Login Response: {response.text[:500]}")
-
-        if response.status_code != 200:
-            print("❌ Inloggen is volledig mislukt op beide endpoints. Controleer eventueel je wachtwoord in GitHub Secrets.")
-            return
+        # We starten een schone, realistische Chromium browser
+        browser = p.chromium.launch(headless=True)
+        
+        # Cruciaal: We bootsen een exacte Windows 11 Desktop na om "witte schermen" (mobiele scripts) te blokkeren
+        context = browser.new_context(
+            viewport={"width": 1920, "height": 1080},
+            user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
+            locale="nl-NL",
+            timezone_id="Europe/Amsterdam"
+        )
+        
+        page = context.new_page()
+        
+        try:
+            print("2. Navigeren naar de Scorito inlogpagina...")
+            # We wachten tot het netwerk minimaal 500ms volledig stil is (alles ingeladen)
+            page.goto("https://www.scorito.com/account/login", wait_until="networkidle", timeout=60000)
             
-    except Exception as e:
-        print(f"❌ Crash tijdens inloggen: {e}")
-        return
+            # Geef zware React-scripts de tijd om te spinnen
+            print("Ademruimte geven voor het bouwen van de pagina...")
+            time.sleep(8)
+            
+            print("3. Controleren op cookie-banner...")
+            # Scorito blokkeert soms invoer als de cookie-overlay eroverheen staat
+            for btn_text in ["Akkoord", "Accepteren", "Accept", "Alle toestaan"]:
+                cookie_btn = page.get_by_role("button", name=btn_text, exact=False).first
+                if cookie_btn.is_visible():
+                    cookie_btn.click()
+                    print(f"Cookie-knop '{btn_text}' aangeklikt.")
+                    time.sleep(3)
+                    break
 
-    # --- STAP 2: DATA OPHALEN ---
-    print("\n--- STAP 2: Proberen stand op te halen ---")
-    ranking_url = f"https://api.scorito.com/v1/footballtournament/ranking/{TOURNAMENT_ID}/{POOL_ID}"
-    headers["Referer"] = f"https://www.scorito.com/footballtournament/ranking/{TOURNAMENT_ID}/{POOL_ID}"
-    
-    # Voeg eventuele autorisatie-tokens toe als Scorito die in de login-response heeft meegestuurd
-    try:
-        login_json = response.json()
-        if "token" in login_json:
-            headers["Authorization"] = f"Bearer {login_json['token']}"
-            print("Token gevonden en toegevoegd aan Authorization header.")
-    except:
-        pass
+            # Sla een controle-screenshot op om te zien of het witte scherm nu weg is
+            page.screenshot(path="01_inlogscherm.png")
+            
+            print("4. Zoeken naar de invoervelden...")
+            # We zoeken heel specifiek op invoervelden, ongeacht hun exacte ID's
+            inputs = page.locator("input").all()
+            print(f"Aantal invoervelden gevonden op scherm: {len(inputs)}")
+            
+            # We vullen de velden in op basis van hun type of positie
+            email_ingevuld = False
+            wachtwoord_ingevuld = False
+            
+            for field in inputs:
+                input_type = field.get_attribute("type") or ""
+                placeholder = field.get_attribute("placeholder") or ""
+                
+                if "email" in input_type or "text" in input_type or "mail" in placeholder.lower():
+                    if not email_ingevuld:
+                        field.fill(SCORITO_USERNAME)
+                        email_ingevuld = True
+                        print("✅ E-mailveld ingevuld.")
+                elif "password" in input_type or "achtwoord" in placeholder.lower():
+                    if not wachtwoord_ingevuld:
+                        field.fill(SCORITO_PASSWORD)
+                        wachtwoord_ingevuld = True
+                        print("✅ Wachtwoordveld ingevuld.")
 
-    try:
-        ranking_response = session.get(ranking_url, headers=headers, timeout=15)
-        print(f"Ranking Statuscode: {ranking_response.status_code}")
-        print(f"Ranking Response Tekst: {ranking_response.text[:1000]}") # Dit laat ons de echte JSON-structuur zien
-        
-        if ranking_response.status_code != 200:
-            print("\nProberen via alternatieve poule-ranking route...")
-            fallback_ranking_url = f"https://api.scorito.com/v1/poule/{POOL_ID}/ranking"
-            ranking_response = session.get(fallback_ranking_url, headers=headers, timeout=15)
-            print(f"Fallback Ranking Statuscode: {ranking_response.status_code}")
-            print(f"Fallback Ranking Response: {ranking_response.text[:1000]}")
+            # Ultieme fallback als de loop hierboven de velden niet kon matchen
+            if not email_ingevuld:
+                page.locator("input[type='email']").fill(SCORITO_USERNAME)
+                page.locator("input[type='password']").fill(SCORITO_PASSWORD)
+                print("Fallback invoer gebruikt.")
 
-        if ranking_response.status_code == 200:
-            # Als dit lukt, schrijven we de ruwe data direct onbewerkt weg naar stand.json
-            raw_data = ranking_response.json()
-            with open("stand.json", "w", encoding="utf-8") as f:
-                json.dump(raw_data, f, indent=4, ensure_ascii=False)
-            print("✅ Ruwe data succesvol in stand.json gedumpt!")
-        else:
-            print("❌ Beide ranking-endpoints gaven geen 200 OK.")
+            time.sleep(1)
+            page.screenshot(path="02_ingevuld.png")
 
-    except Exception as e:
-        print(f"❌ Crash tijdens ophalen ranking: {e}")
+            print("5. Klikken op de inlogknop...")
+            # Zoek de hoofd-inlogknop
+            login_btn = page.locator("button[type='submit'], button:has-text('Inloggen'), .login-button").first
+            login_btn.click()
+            
+            print("6. Wachten op het dashboard...")
+            # We wachten tot de URL verandert naar de applicatie-omgeving
+            try:
+                page.wait_for_url("**/apps/**", timeout=20000)
+                print("Inloggen succesvol! Dashboard bereikt.")
+            except:
+                print("Waarschuwing: URL-wijziging niet gedetecteerd, we proberen toch door te gaan...")
+            
+            time.sleep(5)
+
+            print("7. Direct doorschakelen naar de Poule Ranking...")
+            page.goto(POULE_URL, wait_until="networkidle", timeout=60000)
+            time.sleep(7) # Geef de tabel de tijd om in te laden
+            
+            page.screenshot(path="03_poule_stand.png")
+
+            print("8. De stand uitlezen...")
+            stand_data = []
+            
+            # We zoeken naar tabelrijen (Scorito gebruikt vaak 'tr' of div's met klasse 'row')
+            rows = page.locator("tr, [class*='row'], [class*='item']").all()
+            print(f"Aantal potentiële datarijen op het scherm: {len(rows)}")
+            
+            for row in rows:
+                try:
+                    text = row.inner_text().strip()
+                    if text and "\n" in text:
+                        parts = text.split("\n")
+                        # Een geldige regel begint met een positiecijfer (bijv. "1." of "1")
+                        if len(parts) >= 3 and parts[0].replace('.', '').strip().isdigit():
+                            pos = parts[0].replace('.', '').strip()
+                            naam = parts[1].strip()
+                            punten = parts[2].strip()
+                            
+                            # Voorkom dubbele regels
+                            if not any(d['naam'] == naam for d in stand_data):
+                                stand_data.append({
+                                    "positie": pos,
+                                    "naam": naam,
+                                    "punten": punten
+                                })
+                except:
+                    continue
+
+            if stand_data:
+                with open("stand.json", "w", encoding="utf-8") as f:
+                    json.dump(stand_data, f, indent=4, ensure_ascii=False)
+                print(f"✅ SUCCES: {len(stand_data)} deelnemers opgeslagen in stand.json!")
+            else:
+                print("⚠️ Waarschuwing: Pagina geladen, maar de tabelstructuur kon niet worden uitgelezen.")
+                # Als back-up slaan we de ruwe paginatekst op om te zien wat er staat
+                with open("stand.json", "w", encoding="utf-8") as f:
+                    json.dump({"error": "Tabel niet gevonden", "html": page.content()[:2000]}, f)
+
+        except Exception as e:
+            print(f"❌ FOUT TIJDENS SCRAPEN: {e}")
+            try:
+                page.screenshot(path="04_error.png")
+            except:
+                pass
+            
+        finally:
+            browser.close()
 
 if __name__ == "__main__":
-    debug_scorito_api()
+    scrape_scorito()
