@@ -35,8 +35,9 @@ def scrape_scorito():
         
         try:
             print("2. Navigeren naar de Scorito inlogpagina...")
-            page.goto("https://www.scorito.com/account/login", wait_until="domcontentloaded", timeout=45000)
-            time.sleep(4)
+            # We wachten tot het netwerk helemaal stil is (alles is ingeladen)
+            page.goto("https://www.scorito.com/account/login", wait_until="networkidle", timeout=60000)
+            time.sleep(5)
             
             print("3. Controleren op cookie-pop-up...")
             cookie_button = page.locator('button:has-text("Akkoord"), button:has-text("Accepteren"), button:has-text("Accept"), #CybotCookiebotDialogBodyLevelButtonLevelOptinAllowAll').first
@@ -44,8 +45,8 @@ def scrape_scorito():
                 if cookie_button.is_visible(timeout=5000):
                     print("Cookie-pop-up gevonden, we klikken op akkoord...")
                     cookie_button.click()
-                    print("Wachten tot het inlogscherm zich herstelt...")
-                    time.sleep(5)
+                    print("Extra ademruimte geven zodat de scripts het inlogformulier kunnen opbouwen...")
+                    time.sleep(8)
             except:
                 print("Geen cookieknop gedetecteerd of nodig.")
 
@@ -55,47 +56,19 @@ def scrape_scorito():
             except:
                 pass
 
-            print("4. Zoeken naar de inlogvelden via multi-context scanning...")
-            email_field = None
-            password_field = None
+            print("4. Inlogvelden opsporen met een brede doelgroep-selector...")
+            # We breiden de zoekopdracht uit naar ELK tekst/e-mail-veld of invoerveld op het scherm
+            selector_email = 'input[type="email"], input[type="text"], input[name*="username"], input[id*="username"], [placeholder*="mail"], [placeholder*="Mail"], input'
+            selector_password = 'input[type="password"], input[name*="password"], input[id*="password"], [placeholder*="achtwoord"], [placeholder*="assword"]'
 
-            # Snelkoppeling naar veelgebruikte selectors voor inlogvelden
-            selector_email = 'input[type="email"], input[type="text"], [placeholder*="mail"], [placeholder*="Mail"]'
-            selector_password = 'input[type="password"], [placeholder*="achtwoord"], [placeholder*="assword"]'
+            # Zoek het eerste invoerveld dat op de pagina verschijnt
+            email_field = page.locator(selector_email).first
+            password_field = page.locator(selector_password).first
 
-            # Strategie A: Direct zoeken op de hoofdpagina (en automatische Shadow DOM scan)
-            main_email = page.locator(selector_email).first
-            if main_email.is_visible():
-                print("🎯 Velden direct gevonden op de hoofdpagina!")
-                email_field = main_email
-                password_field = page.locator(selector_password).first
+            print("5. Gegevens invoeren (we wachten maximaal 40 seconden)...")
+            # We verhogen de timeout aanzienlijk voor trage server-runs
+            email_field.wait_for(state="attached", timeout=40000)
             
-            # Strategie B: Als A faalt, scannen we diep door ALLE actieve frames heen
-            if not email_field:
-                print(f"Velden niet direct zichtbaar. We scannen nu alle {len(page.frames)} actieve frames...")
-                for i, frame in enumerate(page.frames):
-                    try:
-                        frame_email = frame.locator(selector_email).first
-                        # We controleren of het element bestaat in dit frame (hoeft nog niet 100% visible te zijn)
-                        if frame_email.count() > 0:
-                            print(f"🎯 Velden gelokaliseerd in frame #{i} (URL: {frame.url})")
-                            email_field = frame_email
-                            password_field = frame.locator(selector_password).first
-                            break
-                    except:
-                        continue
-
-            # Strategie C: Ultieme fallback (als de elementen traag laden, forceren we een harde wachtactie op de hoofdpagina)
-            if not email_field:
-                print("Fallback geactiveerd: We wachten maximaal op de hoofdcontext...")
-                email_field = page.locator(selector_email).first
-                password_field = page.locator(selector_password).first
-
-            print("5. Gegevens invoeren...")
-            # We wachten tot het veld ergens aan de pagina gekoppeld is (attached) in plaats van strikt visible
-            email_field.wait_for(state="attached", timeout=20000)
-            
-            # Focus en typen
             email_field.focus()
             email_field.fill(SCORITO_USERNAME)
             password_field.focus()
@@ -103,22 +76,18 @@ def scrape_scorito():
             time.sleep(1)
             
             print("6. Klikken op de inlogknop...")
-            # We zoeken de inlogknop binnen dezelfde context als waar we het e-mailveld vonden
-            if email_field._frame != page.main_frame:
-                inlog_knop = email_field._frame.locator('button[type="submit"], button:has-text("Inloggen"), .login-button, [class*="submit"]').first
-            else:
-                inlog_knop = page.locator('button[type="submit"], button:has-text("Inloggen"), .login-button, [class*="submit"]').first
-                
+            # Brede zoekopdracht naar de submit- of inlogknop
+            inlog_knop = page.locator('button[type="submit"], button:has-text("Inloggen"), button:has-text("Log in"), .login-button, [class*="submit"], button').first
             inlog_knop.click()
             
             print("7. Wachten op succesvolle login...")
-            page.wait_for_url("**/apps/**", timeout=35000)
+            page.wait_for_url("**/apps/**", timeout=40000)
             print("Inloggen geslaagd!")
-            time.sleep(3)
+            time.sleep(4)
             
             print("8. Navigeren naar de poule-ranking...")
             page.goto(POULE_URL, wait_until="networkidle")
-            time.sleep(5)
+            time.sleep(6)
             
             try:
                 page.screenshot(path="success_screenshot.png", full_page=True)
