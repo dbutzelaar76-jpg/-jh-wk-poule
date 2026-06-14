@@ -44,8 +44,8 @@ def scrape_scorito():
                 if cookie_button.is_visible(timeout=5000):
                     print("Cookie-pop-up gevonden, we klikken op akkoord...")
                     cookie_button.click()
-                    print("Wachten tot de iframe-omgeving achter de pop-up warmdraait...")
-                    time.sleep(6)
+                    print("Wachten tot het inlogscherm zich herstelt...")
+                    time.sleep(5)
             except:
                 print("Geen cookieknop gedetecteerd of nodig.")
 
@@ -55,35 +55,60 @@ def scrape_scorito():
             except:
                 pass
 
-            print("4. Zoeken naar de inlogvelden (Zowel hoofdscherm als Iframe)...")
+            print("4. Zoeken naar de inlogvelden via multi-context scanning...")
             email_field = None
             password_field = None
-            target_context = page
 
-            # We controleren eerst of er stiekem iframes zijn geladen na de cookie-akkoord
-            if len(page.frames) > 1:
-                print(f"Iframe gedetecteerd ({len(page.frames)} frames actief). We switchen naar de juiste context...")
-                for frame in page.frames:
-                    if "scorito" in frame.url or "account" in frame.url or "app" in frame.url:
-                        target_context = frame
-                        print(f"🎯 Inlog-iframe geïdentificeerd: {frame.url}")
-                        break
-                if target_context == page:
-                    print("Geen specifieke URL-match, we gebruiken de eerste sub-frame.")
-                    target_context = page.main_frame.child_frames[0] if page.main_frame.child_frames else page
+            # Snelkoppeling naar veelgebruikte selectors voor inlogvelden
+            selector_email = 'input[type="email"], input[type="text"], [placeholder*="mail"], [placeholder*="Mail"]'
+            selector_password = 'input[type="password"], [placeholder*="achtwoord"], [placeholder*="assword"]'
 
-            # Velden lokaliseren binnen de juiste context
-            email_field = target_context.locator('input[type="email"], input[type="text"], [placeholder*="mail"], [placeholder*="Mail"]').first
-            password_field = target_context.locator('input[type="password"], [placeholder*="achtwoord"], [placeholder*="assword"]').first
+            # Strategie A: Direct zoeken op de hoofdpagina (en automatische Shadow DOM scan)
+            main_email = page.locator(selector_email).first
+            if main_email.is_visible():
+                print("🎯 Velden direct gevonden op de hoofdpagina!")
+                email_field = main_email
+                password_field = page.locator(selector_password).first
+            
+            # Strategie B: Als A faalt, scannen we diep door ALLE actieve frames heen
+            if not email_field:
+                print(f"Velden niet direct zichtbaar. We scannen nu alle {len(page.frames)} actieve frames...")
+                for i, frame in enumerate(page.frames):
+                    try:
+                        frame_email = frame.locator(selector_email).first
+                        # We controleren of het element bestaat in dit frame (hoeft nog niet 100% visible te zijn)
+                        if frame_email.count() > 0:
+                            print(f"🎯 Velden gelokaliseerd in frame #{i} (URL: {frame.url})")
+                            email_field = frame_email
+                            password_field = frame.locator(selector_password).first
+                            break
+                    except:
+                        continue
+
+            # Strategie C: Ultieme fallback (als de elementen traag laden, forceren we een harde wachtactie op de hoofdpagina)
+            if not email_field:
+                print("Fallback geactiveerd: We wachten maximaal op de hoofdcontext...")
+                email_field = page.locator(selector_email).first
+                password_field = page.locator(selector_password).first
 
             print("5. Gegevens invoeren...")
+            # We wachten tot het veld ergens aan de pagina gekoppeld is (attached) in plaats van strikt visible
             email_field.wait_for(state="attached", timeout=20000)
+            
+            # Focus en typen
+            email_field.focus()
             email_field.fill(SCORITO_USERNAME)
+            password_field.focus()
             password_field.fill(SCORITO_PASSWORD)
             time.sleep(1)
             
             print("6. Klikken op de inlogknop...")
-            inlog_knop = target_context.locator('button[type="submit"], button:has-text("Inloggen"), .login-button, [class*="submit"]').first
+            # We zoeken de inlogknop binnen dezelfde context als waar we het e-mailveld vonden
+            if email_field._frame != page.main_frame:
+                inlog_knop = email_field._frame.locator('button[type="submit"], button:has-text("Inloggen"), .login-button, [class*="submit"]').first
+            else:
+                inlog_knop = page.locator('button[type="submit"], button:has-text("Inloggen"), .login-button, [class*="submit"]').first
+                
             inlog_knop.click()
             
             print("7. Wachten op succesvolle login...")
