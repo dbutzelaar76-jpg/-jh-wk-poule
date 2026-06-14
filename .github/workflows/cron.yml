@@ -10,6 +10,10 @@ on:
 jobs:
   scrape-and-update:
     runs-on: ubuntu-latest
+    
+    # GEEF DE WORKFLOW SCHRIJFRECHTEN OM DE STAND.JSON TE PUSHEN
+    permissions:
+      contents: write
 
     steps:
     - name: Checkout repository code
