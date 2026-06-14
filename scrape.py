@@ -13,8 +13,19 @@ def scrape_scorito():
         return
 
     with sync_playwright() as p:
-        browser = p.chromium.launch(
+        print("1. Starten van een gecamoufleerde browseromgeving...")
+        
+        # We maken een tijdelijke gebruikersmap aan om een echte Chrome-installatie na te bootsen
+        user_data_dir = "/tmp/playwright_user_data"
+        
+        # We starten een persistent context; dit camoufleert de browser veel beter tegen anti-bot software
+        context = p.chromium.launch_persistent_context(
+            user_data_dir,
             headless=True,
+            viewport={"width": 1280, "height": 800},
+            user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+            locale="nl-NL",
+            timezone_id="Europe/Amsterdam",
             args=[
                 "--disable-blink-features=AutomationControlled",
                 "--no-sandbox",
@@ -22,68 +33,55 @@ def scrape_scorito():
             ]
         )
         
-        context = browser.new_context(
-            viewport={"width": 1920, "height": 1080},
-            user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
-            locale="nl-NL"
-        )
+        page = context.pages[0] if context.pages else context.new_page()
         
-        context.add_init_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
-        page = context.new_page()
+        # Verberg de automatiseringsvlaggen voor JavaScript
+        page.add_init_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
         
         try:
-            print("1. Navigeren naar Scorito inlogpagina...")
-            page.goto("https://www.scorito.com/account/login", wait_until="networkidle", timeout=45000)
+            print("2. Navigeren naar de Scorito inlogpagina...")
+            page.goto("https://www.scorito.com/account/login", wait_until="domcontentloaded", timeout=45000)
+            time.sleep(5) # Geef de app de tijd om de velden op te bouwen
             
-            print("1b. Controleren op cookie-pop-up...")
+            print("3. Controleren op cookie-pop-up...")
             cookie_button = page.locator('button:has-text("Akkoord"), button:has-text("Accepteren"), button:has-text("Accept"), #CybotCookiebotDialogBodyLevelButtonLevelOptinAllowAll').first
             try:
-                if cookie_button.is_visible(timeout=5000):
+                if cookie_button.is_visible(timeout=4000):
                     print("Cookie-pop-up gevonden, we klikken op akkoord...")
                     cookie_button.click()
-                    time.sleep(5) 
+                    time.sleep(3)
             except:
-                print("Geen actieve cookieknop gevonden.")
+                print("Geen actieve cookieknop gevonden of nodig.")
 
-            print("2. Zoeken naar de juiste Scorito inlog-iframe...")
-            # We wachten tot er een iframe op de pagina verschijnt
-            page.wait_for_selector('iframe', timeout=20000)
-            
-            # We zoeken specifiek de iframe die de inlog-app bevat
-            login_frame = None
-            for frame in page.frames:
-                if "scorito" in frame.url or "app" in frame.url or "account" in frame.url:
-                    login_frame = frame
-                    print(f"🎯 Juiste iframe gevonden! URL: {frame.url}")
-                    break
-            
-            # Als hij hem niet via de URL herkent, pakken we de hoofd-iframe
-            if not login_frame:
-                print("Geen specifieke URL-match, we gebruiken de eerste beschikbare iframe.")
-                login_frame = page.main_frame.child_frames[0] if page.main_frame.child_frames else page
+            # Maak een screenshot om te controleren of het witte scherm nu weg is
+            try:
+                page.screenshot(path="voor_inloggen.png", full_page=True)
+                print("📸 Schermvlak vooraf opgeslagen als 'voor_inloggen.png'")
+            except:
+                pass
 
-            print("3. Inloggegevens invullen binnen de iframe...")
-            # We zoeken de velden nu direct binnen de gevonden frame-context
-            email_field = login_frame.locator('input[type="email"], input[type="text"], [placeholder*="mail"], [placeholder*="Mail"]').first
-            password_field = login_frame.locator('input[type="password"], [placeholder*="achtwoord"], [placeholder*="assword"]').first
+            print("4. Inloggegevens invullen op de hoofdpagina...")
+            # Aangezien er geen iframe is, zoeken we de velden direct op het basisscherm
+            email_field = page.locator('input[type="email"], input[type="text"], [placeholder*="mail"], [placeholder*="Mail"]').first
+            password_field = page.locator('input[type="password"], [placeholder*="achtwoord"], [placeholder*="assword"]').first
             
-            # We wachten tot het e-mailveld daadwerkelijk geladen en klaar is in de iframe
-            email_field.wait_for(state="attached", timeout=20000)
+            # Wacht tot het formulier beschikbaar is op het scherm
+            email_field.wait_for(state="visible", timeout=20000)
             
             email_field.fill(SCORITO_USERNAME)
             password_field.fill(SCORITO_PASSWORD)
             time.sleep(1)
             
-            print("4. Klikken op de inlogknop binnen de iframe...")
-            inlog_knop = login_frame.locator('button[type="submit"], button:has-text("Inloggen"), .login-button, [class*="submit"]').first
+            print("5. Klikken op de inlogknop...")
+            inlog_knop = page.locator('button[type="submit"], button:has-text("Inloggen"), .login-button, [class*="submit"]').first
             inlog_knop.click()
             
-            print("5. Wachten op succesvolle login en doorsturen naar apps...")
-            page.wait_for_url("**/apps/**", timeout=35000)
+            print("6. Wachten op succesvolle login en doorsturen...")
+            page.wait_for_url("**/apps/**", timeout=30000)
             print("Inloggen geslaagd!")
             time.sleep(3)
             
-            print("6. Navigeren naar de juiste poule-ranking...")
+            print("7. Navigeren naar de poule-ranking...")
             page.goto(POULE_URL, wait_until="networkidle")
             time.sleep(5)
             
@@ -93,7 +91,7 @@ def scrape_scorito():
             except:
                 pass
             
-            print("7. Data verzamelen uit de pagina...")
+            print("8. Data verzamelen uit de pagina...")
             stand_data = []
             rows = page.locator('[class*="row"], [class*="item"], tr').all()
             print(f"Aantal potentiële datarijen gedetecteerd: {len(rows)}")
@@ -122,7 +120,7 @@ def scrape_scorito():
                     json.dump(stand_data, f, indent=4, ensure_ascii=False)
                 print(f"✅ Stand succesvol opgeslagen! {len(stand_data)} deelnemers verwerkt.")
             else:
-                print("⚠️ Waarschuwing: Pagina geladen, maar kon geen rijen omzetten naar JSON.")
+                print("⚠️ Waarschuwing: Pagina geladen, maar kon geen data uit de elementen persen.")
 
         except Exception as e:
             print(f"\n❌ ER IS IETS MISGEGAAN TIJDENS HET SCRAPEN: {e}")
@@ -134,7 +132,7 @@ def scrape_scorito():
             raise e
             
         finally:
-            browser.close()
+            context.close()
 
 if __name__ == "__main__":
     scrape_scorito()
