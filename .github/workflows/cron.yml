@@ -2,16 +2,13 @@ name: Scorito Stand Scraper
 
 on:
   schedule:
-    # Dit zorgt ervoor dat hij elke 15 minuten draait
     - cron: '*/15 * * * *'
   workflow_dispatch:
-    # Hiermee behoud je de "Run workflow" knop in GitHub Actions
 
 jobs:
   scrape-and-update:
     runs-on: ubuntu-latest
     
-    # GEEF DE WORKFLOW SCHRIJFRECHTEN OM DE STAND.JSON TE PUSHEN
     permissions:
       contents: write
 
@@ -28,7 +25,6 @@ jobs:
       run: |
         python -m pip install --upgrade pip
         if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
-        playwright install chromium --with-deps
 
     - name: Run Scorito Scraper
       env:
@@ -37,19 +33,11 @@ jobs:
       run: |
         python scrape.py
 
-    - name: Upload Page Screenshots
-      if: always()
-      uses: actions/upload-artifact@v4
-      with:
-        name: scorito-page-screenshots
-        path: "*.png"
-
     - name: Commit and Push changes
       run: |
         git config --global user.name "Scorito Bot"
         git config --global user.email "bot@github.com"
         
-        # Zorg dat git niet struikelt als stand.json nog niet bestaat
         touch stand.json
         git add stand.json
         if git diff --staged --quiet; then
